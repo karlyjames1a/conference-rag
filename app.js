@@ -83,6 +83,8 @@ const ragInput = document.getElementById('rag-input');
 const ragBtn = document.getElementById('rag-btn');
 const ragResults = document.getElementById('rag-results');
 const ragStatus = document.getElementById('rag-status');
+const ragSpeakerFilter = document.getElementById('rag-speaker-filter');
+const ragConferenceFilter = document.getElementById('rag-conference-filter');
 
 // ============================================
 // SETUP BANNER DETECTION
@@ -286,6 +288,50 @@ function showApp(user) {
     if (userEmailSpan) userEmailSpan.textContent = user.email;
     // Check search readiness when user logs in
     checkSearchReadiness();
+    loadRagFilters();
+}
+
+async function loadRagFilters() {
+    if (!supabaseClient) return;
+
+    const { data, error } = await supabaseClient.rpc('get_rag_filter_options');
+    if (error) {
+        console.warn('Could not load RAG filters:', error.message);
+        return;
+    }
+
+    const speakers = [...new Set((data || [])
+        .map(row => row.speaker)
+        .filter(Boolean))]
+        .sort((a, b) => a.localeCompare(b));
+
+    const conferences = [...new Map((data || [])
+        .filter(row => row.year != null && row.season)
+        .map(row => [`${row.year}|${row.season}`, row]))]
+        .map(([, row]) => row)
+        .sort((a, b) => b.year - a.year || a.season.localeCompare(b.season));
+
+    if (ragSpeakerFilter) {
+        ragSpeakerFilter.innerHTML = '<option value="">All speakers</option>';
+        for (const speaker of speakers) {
+            const option = document.createElement('option');
+            option.value = speaker;
+            option.textContent = speaker;
+            ragSpeakerFilter.appendChild(option);
+        }
+        ragSpeakerFilter.disabled = false;
+    }
+
+    if (ragConferenceFilter) {
+        ragConferenceFilter.innerHTML = '<option value="">All conferences</option>';
+        for (const conference of conferences) {
+            const option = document.createElement('option');
+            option.value = `${conference.year}|${conference.season}`;
+            option.textContent = `${conference.year} ${conference.season}`;
+            ragConferenceFilter.appendChild(option);
+        }
+        ragConferenceFilter.disabled = false;
+    }
 }
 
 function showMessage(text, type) {
@@ -530,8 +576,14 @@ async function askQuestion() {
         // Step 1: Get embedding
         const embedding = await getEmbedding(question);
 
-        // Step 2: Search for similar sentences
-        const results = await searchSentences(embedding);
+        // Step 2: Search for similar sentences, applying the selected filters
+        const filters = getRagFilters();
+        const results = await searchSentences(embedding, filters);
+
+        if (!results || results.length === 0) {
+            showResults('rag', '<div class="no-results">No matching talks were found for those filters. Try a different speaker or conference.</div>');
+            return;
+        }
 
         // Step 3: Group by talk (with similarity scores and URLs)
         const topTalks = groupByTalk(results);
@@ -597,13 +649,39 @@ async function getEmbedding(text) {
 }
 
 // Search sentences using vector similarity
-async function searchSentences(embedding) {
+function getRagFilters() {
+    const filters = {
+        speaker: ragSpeakerFilter?.value || null,
+        year: null,
+        season: null
+    };
+
+    const conference = ragConferenceFilter?.value || '';
+    if (conference) {
+        const [year, season] = conference.split('|');
+        filters.year = Number(year);
+        filters.season = season;
+    }
+
+    return filters.speaker || filters.year || filters.season ? filters : null;
+}
+
+async function searchSentences(embedding, filters = null) {
     if (!supabaseClient) throw new Error('Supabase not configured');
 
-    const { data, error } = await supabaseClient.rpc('match_sentences', {
+    const rpcArgs = {
         query_embedding: embedding,
         match_count: 20
-    });
+    };
+
+    const rpcName = filters ? 'match_sentences_filtered' : 'match_sentences';
+    if (filters) {
+        rpcArgs.filter_speaker = filters.speaker;
+        rpcArgs.filter_year = filters.year;
+        rpcArgs.filter_season = filters.season;
+    }
+
+    const { data, error } = await supabaseClient.rpc(rpcName, rpcArgs);
 
     if (error) throw new Error(`Database search failed: ${error.message}`);
     return data;

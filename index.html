@@ -125,6 +125,20 @@
                     </div>
                     <p class="panel-description">Get AI-generated answers based on conference talks. Requires all Edge
                         Functions deployed.</p>
+                    <div class="rag-filters">
+                        <label>
+                            Speaker
+                            <select id="rag-speaker-filter" disabled>
+                                <option value="">All speakers</option>
+                            </select>
+                        </label>
+                        <label>
+                            Conference
+                            <select id="rag-conference-filter" disabled>
+                                <option value="">All conferences</option>
+                            </select>
+                        </label>
+                    </div>
                     <div class="panel-input">
                         <input type="text" id="rag-input" placeholder="Ask a question about conference talks..."
                             autocomplete="off" disabled />

@@ -127,6 +127,63 @@ AS $$
   ORDER BY sentence_embeddings.embedding <=> query_embedding
   LIMIT match_count;
 $$;
+
+-- Filtered similarity search used by the RAG panel.
+-- The filters are optional; NULL means "do not filter".
+CREATE OR REPLACE FUNCTION match_sentences_filtered(
+  query_embedding vector(1536),
+  match_count int DEFAULT 20,
+  filter_speaker text DEFAULT NULL,
+  filter_year integer DEFAULT NULL,
+  filter_season text DEFAULT NULL
+)
+RETURNS TABLE (
+  id uuid,
+  talk_id uuid,
+  title text,
+  speaker text,
+  url text,
+  text text,
+  similarity float
+)
+LANGUAGE sql STABLE
+AS $$
+  SELECT
+    sentence_embeddings.id,
+    sentence_embeddings.talk_id,
+    sentence_embeddings.title,
+    sentence_embeddings.speaker,
+    sentence_embeddings.url,
+    sentence_embeddings.text,
+    1 - (sentence_embeddings.embedding <=> query_embedding) as similarity
+  FROM sentence_embeddings
+  WHERE (filter_speaker IS NULL OR sentence_embeddings.speaker = filter_speaker)
+    AND (filter_year IS NULL OR sentence_embeddings.year = filter_year)
+    AND (filter_season IS NULL OR sentence_embeddings.season = filter_season)
+  ORDER BY sentence_embeddings.embedding <=> query_embedding
+  LIMIT match_count;
+$$;
+
+-- Values used to populate the RAG speaker and conference selectors.
+CREATE OR REPLACE FUNCTION get_rag_filter_options()
+RETURNS TABLE (
+  speaker text,
+  year integer,
+  season text
+)
+LANGUAGE sql STABLE
+AS $$
+  SELECT DISTINCT
+    sentence_embeddings.speaker,
+    sentence_embeddings.year,
+    sentence_embeddings.season
+  FROM sentence_embeddings
+  WHERE sentence_embeddings.speaker IS NOT NULL
+  ORDER BY sentence_embeddings.speaker, sentence_embeddings.year DESC, sentence_embeddings.season;
+$$;
+
+GRANT EXECUTE ON FUNCTION match_sentences_filtered(vector, integer, text, integer, text) TO authenticated;
+GRANT EXECUTE ON FUNCTION get_rag_filter_options() TO authenticated;
 """
 
     url = f"https://api.supabase.com/v1/projects/{SUPABASE_PROJECT_REF}/database/query"
